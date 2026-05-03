@@ -88,10 +88,12 @@
 
   select {
     width: 100%; font-family: var(--sans); font-size: 0.875rem;
-    padding: 0.6rem 0.875rem; border: 1px solid var(--cream-3);
-    border-radius: 8px; background: var(--cream); color: var(--ink);
-    outline: none; cursor: pointer;
+    padding: 0.6rem 2.5rem 0.6rem 0.875rem; border: 1px solid var(--cream-3);
+    border-radius: 8px; background: var(--cream) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%234a4740' d='M1 1 L6 6 L11 1'/%3E%3C/svg%3E") no-repeat right 0.875rem center;
+    background-size: 12px; color: var(--ink); outline: none; cursor: pointer; 
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
   }
+  select::-ms-expand { display: none; }
 
   .generate-btn {
     width: 100%; padding: 0.9rem; font-size: 1rem; font-weight: 600;
@@ -138,7 +140,7 @@
   /* UPGRADE MODAL */
   .modal-overlay {
     display: none; position: fixed; inset: 0; z-index: 200;
-    background: rgba(15,14,12,0.6); backdrop-filter: blur(4px);
+    background: rgba(15,14,12,0.6); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
     align-items: center; justify-content: center;
   }
   .modal-overlay.open { display: flex; }
@@ -221,7 +223,7 @@
     </div>
 
     <div class="field">
-      <label class="field-label">Length</label>
+      <label class="field-label" for="length">Length</label>
       <select id="length">
         <option value="short">Short — 1 to 2 paragraphs</option>
         <option value="medium" selected>Medium — 3 to 4 paragraphs</option>
@@ -378,18 +380,24 @@ function showResult(text) {
 }
 
 async function callAPI(system, user) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const res = await fetch('/api/generate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
       system,
-      messages: [{ role: 'user', content: user }]
+      user
     })
   });
+  
   const data = await res.json();
-  return data.content?.[0]?.text || 'Something went wrong. Please try again.';
+  if (!res.ok) {
+    console.error('API Error:', data);
+    return data.error || 'API error. Check console for details.';
+  }
+
+  return data.text || 'Something went wrong. Please try again.';
 }
 
 async function generate() {

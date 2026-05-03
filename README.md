@@ -6,6 +6,7 @@ AI-powered writing assistant for professionals. Generate emails, proposals, repo
 
 - `index.html` — Landing page (hero, features, pricing, testimonials)
 - `app.html` — The writing app with free/paid tier logic
+- `api/generate.js` — Serverless API route that calls Hugging Face securely
 - `vercel.json` — Vercel deployment config
 
 ## Free / Pro Tier Logic
@@ -41,6 +42,28 @@ Follow the prompts. Your site will be live in ~30 seconds.
 2. In Vercel, click "Import Git Repository"
 3. Select your repo — Vercel auto-deploys on every push
 
+## Environment Variables (Required)
+
+This app uses a server-side API route (`/api/generate`) so your token is not exposed in browser code.
+
+### Vercel (required for runtime)
+
+1. Open your Vercel project
+2. Go to **Settings → Environment Variables**
+3. Add:
+	- **Name**: `HUGGINGFACE_API_TOKEN`
+	- **Value**: your Hugging Face token
+	- **Environment**: Production (and Preview/Development if needed)
+4. Redeploy the project
+
+### GitHub Environment Secret (optional)
+
+If you deploy via GitHub Actions, keep this secret in your GitHub environment too:
+
+- **Name**: `HUGGINGFACE_API_TOKEN`
+
+Note: GitHub secrets are available to workflows, not directly to browser runtime.
+
 ## Adding a Custom Domain
 
 1. In your Vercel project, go to Settings → Domains
@@ -59,12 +82,13 @@ For production, move plan verification server-side (Vercel Functions or a backen
 
 ## Customisation
 
-- **Your API Key**: The app calls the Anthropic API directly. For production, proxy this through a Vercel Function (`/api/generate.js`) to keep your key private.
+- **Your API Key**: The app uses `api/generate.js` to call Hugging Face securely on the server. Keep `HUGGINGFACE_API_TOKEN` only in environment variables.
 - **Branding**: Change colours in the `:root` CSS variables at the top of each file
 - **Pricing**: Update prices in `index.html` under the `#pricing` section
 
 ## Tech Stack
 
 - Pure HTML / CSS / JS — no build step, no frameworks
-- Anthropic Claude API (claude-sonnet-4-20250514)
+- Hugging Face Inference API (Mistral 7B Instruct)
+- Vercel Serverless Function (`api/generate.js`) for secure token handling
 - Vercel for hosting (free tier works perfectly)
