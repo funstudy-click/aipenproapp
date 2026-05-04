@@ -6,6 +6,7 @@
 <title>AIPenPro — Writing Assistant</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -41,6 +42,14 @@
     transition: background 0.2s;
   }
   .upgrade-btn:hover { background: var(--gold-dark); }
+  .auth-btn {
+    font-size: 0.8rem; font-weight: 600; padding: 0.4rem 1rem;
+    background: var(--cream-2); color: var(--ink);
+    border-radius: 999px; border: 1px solid var(--cream-3); cursor: pointer;
+  }
+  .auth-btn:hover { border-color: var(--ink-soft); }
+  .user-email { font-size: 0.8rem; color: var(--ink-soft); max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hidden { display: none; }
   .home-link { font-size: 0.8rem; color: var(--ink-muted); text-decoration: none; }
   .home-link:hover { color: var(--ink); }
 
@@ -91,7 +100,7 @@
     padding: 0.6rem 2.5rem 0.6rem 0.875rem; border: 1px solid var(--cream-3);
     border-radius: 8px; background: var(--cream) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%234a4740' d='M1 1 L6 6 L11 1'/%3E%3C/svg%3E") no-repeat right 0.875rem center;
     background-size: 12px; color: var(--ink); outline: none; cursor: pointer; 
-    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    -webkit-appearance: none; -moz-appearance: none; appearance: none;
   }
   select::-ms-expand { display: none; }
 
@@ -121,6 +130,7 @@
   .output-placeholder { color: var(--ink-muted); font-style: italic; }
 
   .output-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+  #outputActions { display: none; }
   .action-btn {
     font-size: 0.8rem; padding: 0.4rem 1rem;
     border: 1px solid var(--cream-3); border-radius: 999px;
@@ -173,6 +183,25 @@
     transition: background 0.2s;
   }
   .modal-cta:hover { background: var(--gold-dark); }
+
+  .auth-modal { max-width: 420px; text-align: left; }
+  .auth-modal h2 { margin-bottom: 0.25rem; }
+  .auth-sub { font-size: 0.85rem; color: var(--ink-muted); margin-bottom: 1rem; }
+  .auth-form { display: grid; gap: 0.75rem; margin-bottom: 1rem; }
+  .auth-input {
+    width: 100%; font-family: var(--sans); font-size: 0.9rem;
+    padding: 0.7rem 0.8rem; border: 1px solid var(--cream-3); border-radius: 8px;
+    background: var(--cream); color: var(--ink); outline: none;
+  }
+  .auth-input:focus { border-color: var(--gold); background: var(--white); }
+  .auth-links { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+  .auth-link-btn {
+    border: 1px solid var(--cream-3); background: var(--white); color: var(--ink-soft);
+    border-radius: 999px; padding: 0.35rem 0.8rem; font-size: 0.75rem; cursor: pointer;
+    font-family: var(--sans);
+  }
+  .auth-link-btn:hover { border-color: var(--ink-soft); color: var(--ink); }
+  .auth-message { font-size: 0.8rem; min-height: 1.2rem; color: var(--ink-soft); }
 </style>
 </head>
 <body>
@@ -180,7 +209,10 @@
 <nav>
   <a href="index.html" class="nav-logo">AIPen<span>Pro</span></a>
   <div class="nav-right">
-    <span class="usage-pill" id="usagePill">5 / 5 free today</span>
+    <span class="usage-pill" id="usagePill">Register / login required</span>
+    <span id="userEmail" class="user-email hidden"></span>
+    <button class="auth-btn" id="authBtn" onclick="openAuthModal()">Register / Login</button>
+    <button class="auth-btn hidden" id="logoutBtn" onclick="logout()">Logout</button>
     <button class="upgrade-btn" onclick="openModal()">Upgrade to Pro</button>
     <a href="index.html" class="home-link">← Home</a>
   </div>
@@ -242,7 +274,7 @@
     <div class="output-box" id="output">
       <span class="output-placeholder">Your generated content will appear here. Fill in the details on the left and hit Generate.</span>
     </div>
-    <div class="output-actions" id="outputActions" style="display:none;">
+    <div class="output-actions" id="outputActions">
       <button class="action-btn" id="copyBtn" onclick="copyText()">Copy</button>
       <button class="action-btn" onclick="makeItShorter()">Make shorter</button>
       <button class="action-btn" onclick="makeItLonger()">Make longer</button>
@@ -274,12 +306,40 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="authModal" onclick="closeAuthOutside(event)">
+  <div class="modal auth-modal">
+    <h2 id="authTitle">Login</h2>
+    <p class="auth-sub" id="authSub">Sign in to generate content and keep your daily limit secure.</p>
+
+    <form id="authForm" class="auth-form" onsubmit="handleAuthSubmit(event)">
+      <input id="authEmail" class="auth-input" type="email" placeholder="Email" autocomplete="email" required>
+      <input id="authPassword" class="auth-input" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button class="modal-cta" id="authSubmitBtn" type="submit">Login</button>
+    </form>
+
+    <div class="auth-links">
+      <button class="auth-link-btn" type="button" onclick="switchAuthMode('login')">Login</button>
+      <button class="auth-link-btn" type="button" onclick="switchAuthMode('register')">Register</button>
+      <button class="auth-link-btn" type="button" onclick="switchAuthMode('forgot')">Forgot password</button>
+      <button class="auth-link-btn" type="button" onclick="switchAuthMode('reset')">Reset password</button>
+    </div>
+
+    <p class="auth-message" id="authMessage"></p>
+    <button class="modal-close" onclick="closeAuthModal()">Close</button>
+  </div>
+</div>
+
 <script>
 const FREE_LIMIT = 5;
-const STORAGE_KEY = 'aipenproUsage';
+const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
 
 let currentType = 'email';
 let currentTone = 'Professional';
+let authMode = 'login';
+let supabaseClient = null;
+let currentSession = null;
+let remainingToday = null;
 
 const typePrompts = {
   email: 'Write a professional email.',
@@ -299,54 +359,36 @@ const placeholders = {
   custom: 'Describe exactly what you want to write...'
 };
 
-// Usage tracking
-function getUsage() {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return { count: 0, date: today() };
-    const data = JSON.parse(stored);
-    if (data.date !== today()) return { count: 0, date: today() };
-    return data;
-  } catch { return { count: 0, date: today() }; }
-}
-
-function saveUsage(data) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
-}
-
-function today() { return new Date().toISOString().split('T')[0]; }
-
-function isPro() {
-  try { return localStorage.getItem('aipenproPlan') === 'pro'; } catch { return false; }
-}
-
 function updateUsagePill() {
-  const usage = getUsage();
   const pill = document.getElementById('usagePill');
-  if (isPro()) {
-    pill.textContent = '★ Pro — unlimited';
-    pill.className = 'usage-pill';
-    document.querySelector('.upgrade-btn').style.display = 'none';
+  if (!currentSession) {
+    pill.textContent = 'Register / login required';
+    pill.className = 'usage-pill warning';
     return;
   }
-  const remaining = Math.max(0, FREE_LIMIT - usage.count);
-  pill.textContent = remaining + ' / ' + FREE_LIMIT + ' free today';
-  if (remaining === 0) pill.className = 'usage-pill danger';
-  else if (remaining <= 2) pill.className = 'usage-pill warning';
+
+  if (remainingToday === null) {
+    pill.textContent = 'Checking daily limit...';
+    pill.className = 'usage-pill';
+    return;
+  }
+
+  pill.textContent = remainingToday + ' / ' + FREE_LIMIT + ' free today';
+  if (remainingToday === 0) pill.className = 'usage-pill danger';
+  else if (remainingToday <= 2) pill.className = 'usage-pill warning';
   else pill.className = 'usage-pill';
 }
 
 function canGenerate() {
-  if (isPro()) return true;
-  const usage = getUsage();
-  return usage.count < FREE_LIMIT;
-}
-
-function incrementUsage() {
-  const usage = getUsage();
-  usage.count += 1;
-  saveUsage(usage);
-  updateUsagePill();
+  if (!currentSession) {
+    openAuthModal();
+    return false;
+  }
+  if (remainingToday === 0) {
+    openModal();
+    return false;
+  }
+  return true;
 }
 
 // UI helpers
@@ -379,11 +421,21 @@ function showResult(text) {
   document.getElementById('genBtn').disabled = false;
 }
 
+function showError(text) {
+  document.getElementById('output').textContent = text;
+  document.getElementById('outputActions').style.display = 'none';
+  document.getElementById('genBtn').disabled = false;
+}
+
 async function callAPI(system, user) {
+  const token = currentSession?.access_token;
+  if (!token) return { error: 'Please login first.', status: 401 };
+
   const res = await fetch('/api/generate', {
     method: 'POST',
     headers: { 
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
     },
     body: JSON.stringify({
       system,
@@ -394,10 +446,10 @@ async function callAPI(system, user) {
   const data = await res.json();
   if (!res.ok) {
     console.error('API Error:', data);
-    return data.error || 'API error. Check console for details.';
+    return { error: data.error || 'API error. Check console for details.', status: res.status, remaining: data.remaining };
   }
 
-  return data.text || 'Something went wrong. Please try again.';
+  return data;
 }
 
 async function generate() {
@@ -410,29 +462,73 @@ async function generate() {
   const lengthGuide = { short: 'Keep it concise, 1-2 paragraphs max.', medium: 'Write 3-4 well-developed paragraphs.', long: 'Write a detailed, comprehensive piece with full depth.' }[length];
 
   showLoading();
-  incrementUsage();
 
   const system = `You are a professional writing assistant for AIPenPro. Write high-quality, ${currentTone.toLowerCase()} content. ${lengthGuide} Output only the written content — no preamble, no meta-commentary, no subject lines unless it is an email (in which case, include Subject: at the top).`;
-  const text = await callAPI(system, typePrompts[currentType] + ' ' + prompt);
-  showResult(text);
+  const result = await callAPI(system, typePrompts[currentType] + ' ' + prompt);
+
+  if (result.error) {
+    if (typeof result.remaining === 'number') {
+      remainingToday = result.remaining;
+      updateUsagePill();
+    }
+    if (result.status === 401) openAuthModal();
+    if (result.status === 429) openModal();
+    showError(result.error);
+    return;
+  }
+
+  if (typeof result.remaining === 'number') {
+    remainingToday = result.remaining;
+    updateUsagePill();
+  }
+
+  showResult(result.text || 'Something went wrong. Please try again.');
 }
 
 async function makeItShorter() {
   const current = document.getElementById('output').textContent;
   if (!current || current.includes('appear here')) return;
   if (!canGenerate()) { openModal(); return; }
-  showLoading(); incrementUsage();
-  const text = await callAPI('You are an editor. Make the text shorter and more concise, preserving the key message and tone. Output only the revised text, nothing else.', current);
-  showResult(text);
+  showLoading();
+  const result = await callAPI('You are an editor. Make the text shorter and more concise, preserving the key message and tone. Output only the revised text, nothing else.', current);
+  if (result.error) {
+    if (typeof result.remaining === 'number') {
+      remainingToday = result.remaining;
+      updateUsagePill();
+    }
+    if (result.status === 401) openAuthModal();
+    if (result.status === 429) openModal();
+    showError(result.error);
+    return;
+  }
+  if (typeof result.remaining === 'number') {
+    remainingToday = result.remaining;
+    updateUsagePill();
+  }
+  showResult(result.text || 'Something went wrong. Please try again.');
 }
 
 async function makeItLonger() {
   const current = document.getElementById('output').textContent;
   if (!current || current.includes('appear here')) return;
   if (!canGenerate()) { openModal(); return; }
-  showLoading(); incrementUsage();
-  const text = await callAPI('You are a professional writer. Expand this text with more detail, depth, and supporting points, keeping the same tone and purpose. Output only the revised text, nothing else.', current);
-  showResult(text);
+  showLoading();
+  const result = await callAPI('You are a professional writer. Expand this text with more detail, depth, and supporting points, keeping the same tone and purpose. Output only the revised text, nothing else.', current);
+  if (result.error) {
+    if (typeof result.remaining === 'number') {
+      remainingToday = result.remaining;
+      updateUsagePill();
+    }
+    if (result.status === 401) openAuthModal();
+    if (result.status === 429) openModal();
+    showError(result.error);
+    return;
+  }
+  if (typeof result.remaining === 'number') {
+    remainingToday = result.remaining;
+    updateUsagePill();
+  }
+  showResult(result.text || 'Something went wrong. Please try again.');
 }
 
 function regenerate() { generate(); }
@@ -459,16 +555,189 @@ function closeModalOutside(e) {
   if (e.target === document.getElementById('modal')) closeModal();
 }
 function goToPricing() {
-  window.location.href = 'index.html#pricing';
+  globalThis.location.href = 'index.html#pricing';
 }
 
-// Check URL for plan param (demo)
-const params = new URLSearchParams(window.location.search);
-if (params.get('plan') === 'pro' || params.get('plan') === 'business') {
-  try { localStorage.setItem('aipenproPlan', 'pro'); } catch {}
+function openAuthModal() {
+  document.getElementById('authModal').classList.add('open');
 }
 
-updateUsagePill();
+function closeAuthModal() {
+  document.getElementById('authModal').classList.remove('open');
+  setAuthMessage('');
+}
+
+function closeAuthOutside(e) {
+  if (e.target === document.getElementById('authModal')) closeAuthModal();
+}
+
+function setAuthMessage(msg, isError = false) {
+  const el = document.getElementById('authMessage');
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--red)' : 'var(--ink-soft)';
+}
+
+function switchAuthMode(mode) {
+  authMode = mode;
+  const title = document.getElementById('authTitle');
+  const sub = document.getElementById('authSub');
+  const submit = document.getElementById('authSubmitBtn');
+  const pass = document.getElementById('authPassword');
+
+  if (mode === 'register') {
+    title.textContent = 'Create account';
+    sub.textContent = 'Register to secure your daily generation limit.';
+    submit.textContent = 'Register';
+    pass.placeholder = 'Create password';
+    pass.required = true;
+    pass.style.display = 'block';
+  } else if (mode === 'forgot') {
+    title.textContent = 'Forgot password';
+    sub.textContent = 'We will email a reset link.';
+    submit.textContent = 'Send reset link';
+    pass.required = false;
+    pass.style.display = 'none';
+  } else if (mode === 'reset') {
+    title.textContent = 'Reset password';
+    sub.textContent = 'Set your new password.';
+    submit.textContent = 'Update password';
+    pass.placeholder = 'New password';
+    pass.required = true;
+    pass.style.display = 'block';
+  } else {
+    title.textContent = 'Login';
+    sub.textContent = 'Sign in to generate content and keep your daily limit secure.';
+    submit.textContent = 'Login';
+    pass.placeholder = 'Password';
+    pass.required = true;
+    pass.style.display = 'block';
+  }
+  setAuthMessage('');
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  if (!supabaseClient) {
+    setAuthMessage('Supabase is not configured yet. Add SUPABASE_URL and SUPABASE_ANON_KEY in app.html.', true);
+    return;
+  }
+
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+
+  if (!email) {
+    setAuthMessage('Email is required.', true);
+    return;
+  }
+
+  try {
+    if (authMode === 'register') {
+      const { error } = await supabaseClient.auth.signUp({ email, password });
+      if (error) throw error;
+      setAuthMessage('Account created. Check your email to confirm, then login.');
+      switchAuthMode('login');
+      return;
+    }
+
+    if (authMode === 'forgot') {
+      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: globalThis.location.origin + '/app.html'
+      });
+      if (error) throw error;
+      setAuthMessage('Reset link sent. Check your email.');
+      return;
+    }
+
+    if (authMode === 'reset') {
+      const { error } = await supabaseClient.auth.updateUser({ password });
+      if (error) throw error;
+      setAuthMessage('Password updated. You can continue using the app.');
+      closeAuthModal();
+      return;
+    }
+
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    setAuthMessage('Logged in successfully.');
+    closeAuthModal();
+  } catch (err) {
+    setAuthMessage(err.message || 'Authentication failed.', true);
+  }
+}
+
+async function logout() {
+  if (!supabaseClient) return;
+  await supabaseClient.auth.signOut();
+}
+
+async function fetchUsage() {
+  if (!currentSession) return;
+  try {
+    const res = await fetch('/api/usage', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${currentSession.access_token}` }
+    });
+    const data = await res.json();
+    if (!res.ok) return;
+    remainingToday = data.remaining;
+    updateUsagePill();
+  } catch {
+    // Keep current display if usage endpoint is temporarily unavailable.
+  }
+}
+
+async function setSession(session) {
+  currentSession = session;
+  remainingToday = null;
+
+  const emailEl = document.getElementById('userEmail');
+  const authBtn = document.getElementById('authBtn');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  if (session?.user?.email) {
+    emailEl.textContent = session.user.email;
+    emailEl.style.display = 'inline';
+    authBtn.style.display = 'none';
+    logoutBtn.style.display = 'inline-block';
+    updateUsagePill();
+    await fetchUsage();
+  } else {
+    emailEl.style.display = 'none';
+    authBtn.style.display = 'inline-block';
+    logoutBtn.style.display = 'none';
+    updateUsagePill();
+  }
+}
+
+function isSupabaseConfigured() {
+  return !SUPABASE_URL.includes('YOUR_SUPABASE_URL') && !SUPABASE_ANON_KEY.includes('YOUR_SUPABASE_ANON_KEY');
+}
+
+async function initAuth() {
+  switchAuthMode('login');
+
+  if (!isSupabaseConfigured()) {
+    updateUsagePill();
+    setAuthMessage('Configure SUPABASE_URL and SUPABASE_ANON_KEY in app.html first.', true);
+    return;
+  }
+
+  supabaseClient = globalThis.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  const { data } = await supabaseClient.auth.getSession();
+  await setSession(data.session);
+
+  supabaseClient.auth.onAuthStateChange(async (_event, session) => {
+    await setSession(session);
+  });
+
+  if (globalThis.location.hash.includes('type=recovery')) {
+    switchAuthMode('reset');
+    openAuthModal();
+  }
+}
+
+initAuth();
 </script>
 </body>
 </html>

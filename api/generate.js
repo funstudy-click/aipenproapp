@@ -4,11 +4,40 @@ export default async function handler(req, res) {
     return;
   }
 
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const apiKey = process.env.HUGGINGFACE_API_TOKEN || process.env.HUGGINGFACE_API_TOKEN_HERE;
-  if (!apiKey) {
+  if (!apiKey || !supabaseUrl || !supabaseServiceRoleKey) {
     res.status(500).json({
-      error: 'Missing HUGGINGFACE_API_TOKEN (or HUGGINGFACE_API_TOKEN_HERE) server environment variable.'
+      error: 'Missing required server env vars. Required: HUGGINGFACE_API_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.'
     });
+    return;
+  }
+
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token) {
+    res.status(401).json({ error: 'Please login first.' });
+    return;
+  }
+
+  const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    method: 'GET',
+    headers: {
+      apikey: supabaseServiceRoleKey,
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!userRes.ok) {
+    res.status(401).json({ error: 'Invalid or expired session. Please login again.' });
+    return;
+  }
+
+  const authUser = await userRes.json();
+  const userId = authUser?.id;
+  if (!userId) {
+    res.status(401).json({ error: 'User not found for this session.' });
     return;
   }
 
@@ -16,6 +45,67 @@ export default async function handler(req, res) {
   if (!system || !user) {
     res.status(400).json({ error: 'Missing system or user prompt.' });
     return;
+  }
+
+  const limit = 5;
+  const today = new Date().toISOString().split('T')[0];
+
+  const usageRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily?user_id=eq.${userId}&usage_date=eq.${today}&select=count`, {
+    method: 'GET',
+    headers: {
+      apikey: supabaseServiceRoleKey,
+      Authorization: `Bearer ${supabaseServiceRoleKey}`
+    }
+  });
+
+  if (!usageRes.ok) {
+    const usageErr = await usageRes.json();
+    if (usageErr?.code === '42P01') {
+      res.status(500).json({
+        error: 'usage_daily table not found. Run setup SQL in README before deploying auth limits.'
+      });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to read usage limits.' });
+    return;
+  }
+
+  const usageRows = await usageRes.json();
+  const currentCount = usageRows?.[0]?.count || 0;
+  if (currentCount >= limit) {
+    res.status(429).json({ error: 'Daily free limit reached. Please upgrade to Pro.', remaining: 0 });
+    return;
+  }
+
+  if (usageRows.length > 0) {
+    const nextCount = currentCount + 1;
+    const patchRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily?user_id=eq.${userId}&usage_date=eq.${today}`, {
+      method: 'PATCH',
+      headers: {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ count: nextCount })
+    });
+    if (!patchRes.ok) {
+      res.status(500).json({ error: 'Failed to update usage count.' });
+      return;
+    }
+  } else {
+    const insertRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily`, {
+      method: 'POST',
+      headers: {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ user_id: userId, usage_date: today, count: 1 })
+    });
+    if (!insertRes.ok) {
+      res.status(500).json({ error: 'Failed to initialize usage count.' });
+      return;
+    }
   }
 
   const model = 'mistralai/Mistral-7B-Instruct-v0.1';
@@ -50,8 +140,9 @@ export default async function handler(req, res) {
 
     const fullText = data?.[0]?.generated_text || '';
     const text = fullText.replace(prompt, '').trim();
+    const remaining = Math.max(0, limit - (currentCount + 1));
 
-    res.status(200).json({ text: text || 'Something went wrong. Please try again.' });
+    res.status(200).json({ text: text || 'Something went wrong. Please try again.', remaining });
   } catch (error) {
     res.status(500).json({
       error: 'Server error while calling Hugging Face.',
