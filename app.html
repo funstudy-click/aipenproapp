@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://www.google.com/recaptcha/api.js?render=6Lf8WbMqAAAAAGnJLmU7vdCfmP8FfLCJVNrLQyJa"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -202,6 +203,23 @@
   }
   .auth-link-btn:hover { border-color: var(--ink-soft); color: var(--ink); }
   .auth-message { font-size: 0.8rem; min-height: 1.2rem; color: var(--ink-soft); }
+  .email-verify-banner {
+    background: rgba(26,122,74,0.08); border: 1px solid rgba(26,122,74,0.2);
+    border-radius: 8px; padding: 1rem; margin-bottom: 1rem; font-size: 0.8rem;
+    color: var(--green); text-align: center;
+  }
+  .email-verify-banner a { color: var(--green); font-weight: 600; text-decoration: none; }
+  .email-verify-banner a:hover { text-decoration: underline; }
+  .social-divider { display: flex; align-items: center; gap: 0.75rem; margin: 1rem 0; color: var(--ink-muted); font-size: 0.75rem; }
+  .social-divider::before, .social-divider::after { content: ''; flex: 1; height: 1px; background: var(--cream-3); }
+  .social-login-row { display: flex; gap: 0.5rem; }
+  .social-btn {
+    flex: 1; padding: 0.6rem 0.5rem; border: 1px solid var(--cream-3); border-radius: 8px;
+    background: var(--cream); color: var(--ink-soft); font-size: 0.75rem; cursor: pointer;
+    font-family: var(--sans); transition: all 0.15s;
+  }
+  .social-btn:hover { border-color: var(--ink-soft); color: var(--ink); }
+  .throttle-warning { background: rgba(184,50,50,0.08); border: 1px solid rgba(184,50,50,0.2); border-radius: 8px; padding: 0.75rem; font-size: 0.8rem; color: var(--red); margin-bottom: 1rem; text-align: center; }
 </style>
 </head>
 <body>
@@ -308,8 +326,10 @@
 
 <div class="modal-overlay" id="authModal" onclick="closeAuthOutside(event)">
   <div class="modal auth-modal">
+    <div id="throttleWarning" class="throttle-warning hidden"></div>
     <h2 id="authTitle">Login</h2>
     <p class="auth-sub" id="authSub">Sign in to generate content and keep your daily limit secure.</p>
+    <div id="emailVerifyBanner" class="email-verify-banner hidden">✓ Check your email to verify your account. <a href="#" onclick="resendVerification(event)">Resend</a></div>
 
     <form id="authForm" class="auth-form" onsubmit="handleAuthSubmit(event)">
       <input id="authEmail" class="auth-input" type="email" placeholder="Email" autocomplete="email" required>
@@ -324,6 +344,12 @@
       <button class="auth-link-btn" type="button" onclick="switchAuthMode('reset')">Reset password</button>
     </div>
 
+    <div id="socialLoginSection" class="social-divider hidden">Or continue with</div>
+    <div id="socialLoginButtons" class="social-login-row hidden">
+      <button type="button" class="social-btn" onclick="loginWithProvider('google')">🔵 Google</button>
+      <button type="button" class="social-btn" onclick="loginWithProvider('github')">⚫ GitHub</button>
+    </div>
+
     <p class="auth-message" id="authMessage"></p>
     <button class="modal-close" onclick="closeAuthModal()">Close</button>
   </div>
@@ -331,8 +357,8 @@
 
 <script>
 const FREE_LIMIT = 5;
-const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-const SUPABASE_ANON_KEY = 'YOUR_SUPABASE_ANON_KEY';
+const SUPABASE_URL = 'https://uoljojbxntcwfaojggly.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable__F51-ZwmibtVqHl6mY3z4A_4e-bbdqT';
 
 let currentType = 'email';
 let currentTone = 'Professional';
@@ -340,6 +366,8 @@ let authMode = 'login';
 let supabaseClient = null;
 let currentSession = null;
 let remainingToday = null;
+let lastLoginAttempt = 0;
+let loginThrottleCount = 0;
 
 const typePrompts = {
   email: 'Write a professional email.',
@@ -430,6 +458,7 @@ function showError(text) {
 async function callAPI(system, user) {
   const token = currentSession?.access_token;
   if (!token) return { error: 'Please login first.', status: 401 };
+  if (!currentSession.user?.email_confirmed_at) return { error: 'Please verify your email first. Check your inbox for confirmation link.', status: 403 };
 
   const res = await fetch('/api/generate', {
     method: 'POST',
@@ -472,6 +501,10 @@ async function generate() {
       updateUsagePill();
     }
     if (result.status === 401) openAuthModal();
+    if (result.status === 403) {
+      openAuthModal();
+      document.getElementById('emailVerifyBanner').classList.remove('hidden');
+    }
     if (result.status === 429) openModal();
     showError(result.error);
     return;
@@ -497,6 +530,10 @@ async function makeItShorter() {
       updateUsagePill();
     }
     if (result.status === 401) openAuthModal();
+    if (result.status === 403) {
+      openAuthModal();
+      document.getElementById('emailVerifyBanner').classList.remove('hidden');
+    }
     if (result.status === 429) openModal();
     showError(result.error);
     return;
@@ -520,6 +557,10 @@ async function makeItLonger() {
       updateUsagePill();
     }
     if (result.status === 401) openAuthModal();
+    if (result.status === 403) {
+      openAuthModal();
+      document.getElementById('emailVerifyBanner').classList.remove('hidden');
+    }
     if (result.status === 429) openModal();
     showError(result.error);
     return;
@@ -583,6 +624,13 @@ function switchAuthMode(mode) {
   const sub = document.getElementById('authSub');
   const submit = document.getElementById('authSubmitBtn');
   const pass = document.getElementById('authPassword');
+  const socialSection = document.getElementById('socialLoginSection');
+  const socialButtons = document.getElementById('socialLoginButtons');
+  const emailBanner = document.getElementById('emailVerifyBanner');
+  const throttleWarning = document.getElementById('throttleWarning');
+
+  emailBanner.classList.add('hidden');
+  throttleWarning.classList.add('hidden');
 
   if (mode === 'register') {
     title.textContent = 'Create account';
@@ -591,12 +639,16 @@ function switchAuthMode(mode) {
     pass.placeholder = 'Create password';
     pass.required = true;
     pass.style.display = 'block';
+    socialSection.classList.remove('hidden');
+    socialButtons.classList.remove('hidden');
   } else if (mode === 'forgot') {
     title.textContent = 'Forgot password';
     sub.textContent = 'We will email a reset link.';
     submit.textContent = 'Send reset link';
     pass.required = false;
     pass.style.display = 'none';
+    socialSection.classList.add('hidden');
+    socialButtons.classList.add('hidden');
   } else if (mode === 'reset') {
     title.textContent = 'Reset password';
     sub.textContent = 'Set your new password.';
@@ -604,6 +656,8 @@ function switchAuthMode(mode) {
     pass.placeholder = 'New password';
     pass.required = true;
     pass.style.display = 'block';
+    socialSection.classList.add('hidden');
+    socialButtons.classList.add('hidden');
   } else {
     title.textContent = 'Login';
     sub.textContent = 'Sign in to generate content and keep your daily limit secure.';
@@ -611,6 +665,8 @@ function switchAuthMode(mode) {
     pass.placeholder = 'Password';
     pass.required = true;
     pass.style.display = 'block';
+    socialSection.classList.remove('hidden');
+    socialButtons.classList.remove('hidden');
   }
   setAuthMessage('');
 }
@@ -630,12 +686,35 @@ async function handleAuthSubmit(e) {
     return;
   }
 
+  // Check login throttling for login attempts only
+  if (authMode === 'login') {
+    try {
+      const throttleRes = await fetch('/api/auth-throttle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, action: 'check' })
+      });
+      const throttleData = await throttleRes.json();
+      if (throttleData.blocked) {
+        setAuthMessage('Too many login attempts. Please try again in 15 minutes.', true);
+        document.getElementById('throttleWarning').textContent = `Too many attempts (${throttleData.attemptsRemaining} left). Try again in 15 min.`;
+        document.getElementById('throttleWarning').classList.remove('hidden');
+        return;
+      }
+    } catch (_) {
+      // If throttle check fails, continue
+    }
+  }
+
   try {
     if (authMode === 'register') {
       const { error } = await supabaseClient.auth.signUp({ email, password });
       if (error) throw error;
-      setAuthMessage('Account created. Check your email to confirm, then login.');
+      document.getElementById('emailVerifyBanner').classList.remove('hidden');
+      setAuthMessage('Account created! Check your email to verify your account.');
       switchAuthMode('login');
+      // Clear password field for security
+      document.getElementById('authPassword').value = '';
       return;
     }
 
@@ -656,8 +735,19 @@ async function handleAuthSubmit(e) {
       return;
     }
 
+    // Login attempt
     const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+    if (error) {
+      // Record failed attempt for throttling
+      try {
+        await fetch('/api/auth-throttle', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, action: 'record' })
+        });
+      } catch (_) {}
+      throw error;
+    }
     setAuthMessage('Logged in successfully.');
     closeAuthModal();
   } catch (err) {
@@ -668,6 +758,40 @@ async function handleAuthSubmit(e) {
 async function logout() {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();
+}
+
+async function loginWithProvider(provider) {
+  if (!supabaseClient) return;
+  try {
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: provider,
+      options: {
+        redirectTo: globalThis.location.origin + '/app.html'
+      }
+    });
+    if (error) throw error;
+  } catch (err) {
+    setAuthMessage(err.message || `${provider} login failed.`, true);
+  }
+}
+
+async function resendVerification(e) {
+  e.preventDefault();
+  const email = document.getElementById('authEmail').value.trim();
+  if (!email || !supabaseClient) {
+    setAuthMessage('Enter email and try again.', true);
+    return;
+  }
+  try {
+    const { error } = await supabaseClient.auth.resend({
+      type: 'signup',
+      email: email
+    });
+    if (error) throw error;
+    setAuthMessage('Verification email sent! Check your inbox.');
+  } catch (err) {
+    setAuthMessage(err.message || 'Failed to resend verification.', true);
+  }
 }
 
 async function fetchUsage() {

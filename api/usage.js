@@ -40,7 +40,34 @@ export default async function handler(req, res) {
     return;
   }
 
-  const limit = 5;
+  // Check if email is verified
+  if (!authUser.email_confirmed_at) {
+    res.status(403).json({ 
+      error: 'Please verify your email first.' 
+    });
+    return;
+  }
+
+  // Get user plan
+  let limit = 5;
+  try {
+    const profileRes = await fetch(`${supabaseUrl}/rest/v1/user_profiles?user_id=eq.${userId}&select=plan`, {
+      method: 'GET',
+      headers: {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`
+      }
+    });
+
+    if (profileRes.ok) {
+      const profiles = await profileRes.json();
+      if (profiles?.[0]?.plan === 'pro') {
+        limit = 9999;
+      }
+    }
+  } catch (_) {
+    // Default to free
+  }
   const today = new Date().toISOString().split('T')[0];
 
   const usageRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily?user_id=eq.${userId}&usage_date=eq.${today}&select=count`, {

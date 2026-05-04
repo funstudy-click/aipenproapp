@@ -41,13 +41,40 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Check if email is verified
+  if (!authUser.email_confirmed_at) {
+    res.status(403).json({ 
+      error: 'Please verify your email first. Check your inbox for the confirmation link.' 
+    });
+    return;
+  }
+
   const { system, user } = req.body || {};
   if (!system || !user) {
     res.status(400).json({ error: 'Missing system or user prompt.' });
     return;
   }
 
-  const limit = 5;
+  // Get user plan from profiles table
+  let limit = 5;
+  try {
+    const profileRes = await fetch(`${supabaseUrl}/rest/v1/user_profiles?user_id=eq.${userId}&select=plan`, {
+      method: 'GET',
+      headers: {
+        apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`
+      }
+    });
+
+    if (profileRes.ok) {
+      const profiles = await profileRes.json();
+      if (profiles?.[0]?.plan === 'pro') {
+        limit = 9999; // Unlimited for pro users
+      }
+    }
+  } catch (_) {
+    // If profile check fails, default to free limit
+  }
   const today = new Date().toISOString().split('T')[0];
 
   const usageRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily?user_id=eq.${userId}&usage_date=eq.${today}&select=count`, {
