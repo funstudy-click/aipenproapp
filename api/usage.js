@@ -5,7 +5,7 @@ export default async function handler(req, res) {
   }
 
   const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.UPABASE_SERVICE_ROLE_KEY;
   if (!supabaseUrl || !supabaseServiceRoleKey) {
     res.status(500).json({
       error: 'Missing required server env vars. Required: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.'
