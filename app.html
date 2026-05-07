@@ -802,11 +802,19 @@ async function fetchUsage() {
       headers: { Authorization: `Bearer ${currentSession.access_token}` }
     });
     const data = await res.json();
-    if (!res.ok) return;
+    if (!res.ok) {
+      // Fall back to full free quota display to avoid an infinite "Checking..." UI state.
+      remainingToday = FREE_LIMIT;
+      updateUsagePill();
+      if (data?.error) setAuthMessage(data.error, true);
+      return;
+    }
     remainingToday = data.remaining;
     updateUsagePill();
   } catch {
-    // Keep current display if usage endpoint is temporarily unavailable.
+    // Fall back to full free quota display if usage endpoint is temporarily unavailable.
+    remainingToday = FREE_LIMIT;
+    updateUsagePill();
   }
 }
 

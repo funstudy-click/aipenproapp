@@ -86,14 +86,25 @@ export default async function handler(req, res) {
   });
 
   if (!usageRes.ok) {
-    const usageErr = await usageRes.json();
-    if (usageErr?.code === '42P01') {
+    let usageErr = null;
+    try {
+      usageErr = await usageRes.json();
+    } catch (e) {
+      usageErr = { message: 'Non-JSON error response from Supabase REST API.' };
+    }
+
+    const errCode = usageErr?.code || '';
+    if (errCode === '42P01' || errCode === 'PGRST205') {
       res.status(500).json({
-        error: 'usage_daily table not found. Run setup SQL in README before deploying auth limits.'
+        error: 'usage_daily table not found or not exposed in Data API. Run setup SQL and ensure table is in exposed schema.',
+        details: usageErr
       });
       return;
     }
-    res.status(500).json({ error: 'Failed to read usage limits.' });
+    res.status(500).json({
+      error: 'Failed to read usage limits.',
+      details: usageErr
+    });
     return;
   }
 
