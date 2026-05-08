@@ -117,7 +117,7 @@ export default async function handler(req, res) {
 
   // This provider currently rejects some legacy Mistral model IDs.
   // Override with HUGGINGFACE_MODEL in Vercel env vars when needed.
-  const model = process.env.HUGGINGFACE_MODEL || 'google/flan-t5-large';
+  const model = process.env.HUGGINGFACE_MODEL || 'gpt2';
   const hfUrl = `https://router.huggingface.co/hf-inference/models/${model}`;
   const prompt = `${system}\n\n${user}`;
 
@@ -165,7 +165,11 @@ export default async function handler(req, res) {
     if (!hfRes.ok) {
       res.status(hfRes.status).json({
         error: data?.error || 'Hugging Face API request failed.',
-        details: data
+        details: {
+          model,
+          endpoint: hfUrl,
+          response: data
+        }
       });
       return;
     }
