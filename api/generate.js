@@ -115,7 +115,9 @@ export default async function handler(req, res) {
     return;
   }
 
-  const model = 'mistralai/Mistral-7B-Instruct-v0.1';
+  // This provider currently rejects some legacy Mistral model IDs.
+  // Override with HUGGINGFACE_MODEL in Vercel env vars when needed.
+  const model = process.env.HUGGINGFACE_MODEL || 'google/flan-t5-large';
   const hfUrl = `https://router.huggingface.co/hf-inference/models/${model}`;
   const prompt = `${system}\n\n${user}`;
 
