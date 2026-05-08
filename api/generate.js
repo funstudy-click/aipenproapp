@@ -72,8 +72,9 @@ export default async function handler(req, res) {
         limit = 9999; // Unlimited for pro users
       }
     }
-  } catch (_) {
-    // If profile check fails, default to free limit
+  } catch (err) {
+    // If profile check fails, default to free limit.
+    console.error('Profile lookup failed:', String(err));
   }
   const today = new Date().toISOString().split('T')[0];
 
@@ -90,7 +91,10 @@ export default async function handler(req, res) {
     try {
       usageErr = await usageRes.json();
     } catch (e) {
-      usageErr = { message: 'Non-JSON error response from Supabase REST API.' };
+      usageErr = {
+        message: 'Non-JSON error response from Supabase REST API.',
+        parseError: String(e)
+      };
     }
 
     const errCode = usageErr?.code || '';
@@ -115,68 +119,112 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Use direct Inference API endpoint to avoid provider routing incompatibilities.
-  const model = process.env.HUGGINGFACE_MODEL || 'google/flan-t5-base';
-  const hfUrl = `https://api-inference.huggingface.co/models/${model}`;
   const prompt = `${system}\n\n${user}`;
 
   try {
-    const hfRes = await fetch(hfUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        inputs: prompt,
-        parameters: {
-          max_new_tokens: 500,
-          temperature: 0.7,
-          top_p: 0.9
+    const preferredModel = process.env.HUGGINGFACE_MODEL || '';
+    const candidateModels = [
+      preferredModel,
+      'google/flan-t5-large',
+      'google/flan-t5-base',
+      'bigscience/bloom-560m',
+      'distilgpt2'
+    ].filter(Boolean);
+
+    let selectedModel = null;
+    let successData = null;
+    let lastFailure = null;
+
+    for (const model of candidateModels) {
+      const hfUrl = `https://router.huggingface.co/hf-inference/models/${model}`;
+      const hfRes = await fetch(hfUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`
         },
-        options: {
-          wait_for_model: true
+        body: JSON.stringify({
+          inputs: prompt,
+          parameters: {
+            max_new_tokens: 500,
+            temperature: 0.7,
+            top_p: 0.9
+          }
+        })
+      });
+
+      const contentType = hfRes.headers.get('content-type') || '';
+      const rawBody = await hfRes.text();
+      let data = null;
+
+      try {
+        data = JSON.parse(rawBody);
+      } catch (e) {
+        data = null;
+        if (rawBody) {
+          console.error('Failed to parse Hugging Face JSON response:', String(e));
         }
-      })
-    });
+      }
 
-    const contentType = hfRes.headers.get('content-type') || '';
-    const rawBody = await hfRes.text();
-    let data = null;
+      if (!data) {
+        lastFailure = {
+          status: hfRes.status,
+          error: 'Hugging Face API request failed with non-JSON response.',
+          details: {
+            model,
+            endpoint: hfUrl,
+            contentType,
+            preview: rawBody.slice(0, 300)
+          }
+        };
+        break;
+      }
 
-    try {
-      data = JSON.parse(rawBody);
-    } catch (_e) {
-      data = null;
+      if (!hfRes.ok) {
+        const errMsg = String(data?.error || '');
+
+        // Try next model when provider rejects a specific model.
+        if (errMsg.includes('Model not supported by provider')) {
+          lastFailure = {
+            status: hfRes.status,
+            error: errMsg,
+            details: { model, endpoint: hfUrl, response: data }
+          };
+          continue;
+        }
+
+        if (hfRes.status === 401) {
+          res.status(401).json({
+            error: 'Invalid Hugging Face token. Update HUGGINGFACE_API_TOKEN in Vercel project settings.',
+            details: { model, endpoint: hfUrl, response: data }
+          });
+          return;
+        }
+
+        res.status(hfRes.status).json({
+          error: data?.error || 'Hugging Face API request failed.',
+          details: { model, endpoint: hfUrl, response: data }
+        });
+        return;
+      }
+
+      selectedModel = model;
+      successData = data;
+      break;
     }
 
-    if (!data) {
-      res.status(hfRes.ok ? 502 : hfRes.status).json({
-        error: hfRes.ok
-          ? 'Hugging Face returned a non-JSON response.'
-          : 'Hugging Face API request failed with non-JSON response.',
+    if (!successData) {
+      res.status(lastFailure?.status || 502).json({
+        error: lastFailure?.error || 'No supported Hugging Face model succeeded.',
         details: {
-          endpoint: hfUrl,
-          contentType,
-          preview: rawBody.slice(0, 300)
+          attemptedModels: candidateModels,
+          lastFailure: lastFailure?.details || null
         }
       });
       return;
     }
 
-    if (!hfRes.ok) {
-      res.status(hfRes.status).json({
-        error: data?.error || 'Hugging Face API request failed.',
-        details: {
-          model,
-          endpoint: hfUrl,
-          response: data
-        }
-      });
-      return;
-    }
-
-    const fullText = data?.[0]?.generated_text || data?.generated_text || '';
+    const fullText = successData?.[0]?.generated_text || successData?.generated_text || '';
     const text = fullText.replace(prompt, '').trim();
 
     // Count usage only after successful text generation.
@@ -213,7 +261,7 @@ export default async function handler(req, res) {
 
     const remaining = Math.max(0, limit - (currentCount + 1));
 
-    res.status(200).json({ text: text || 'Something went wrong. Please try again.', remaining });
+    res.status(200).json({ text: text || 'Something went wrong. Please try again.', remaining, model: selectedModel });
   } catch (error) {
     res.status(500).json({
       error: 'Server error while calling Hugging Face.',
