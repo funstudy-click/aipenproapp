@@ -115,37 +115,6 @@ export default async function handler(req, res) {
     return;
   }
 
-  if (usageRows.length > 0) {
-    const nextCount = currentCount + 1;
-    const patchRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily?user_id=eq.${userId}&usage_date=eq.${today}`, {
-      method: 'PATCH',
-      headers: {
-        apikey: supabaseServiceRoleKey,
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ count: nextCount })
-    });
-    if (!patchRes.ok) {
-      res.status(500).json({ error: 'Failed to update usage count.' });
-      return;
-    }
-  } else {
-    const insertRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily`, {
-      method: 'POST',
-      headers: {
-        apikey: supabaseServiceRoleKey,
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ user_id: userId, usage_date: today, count: 1 })
-    });
-    if (!insertRes.ok) {
-      res.status(500).json({ error: 'Failed to initialize usage count.' });
-      return;
-    }
-  }
-
   const model = 'mistralai/Mistral-7B-Instruct-v0.1';
   const prompt = `${system}\n\n${user}`;
 
@@ -166,7 +135,28 @@ export default async function handler(req, res) {
       })
     });
 
-    const data = await hfRes.json();
+    const contentType = hfRes.headers.get('content-type') || '';
+    const rawBody = await hfRes.text();
+    let data = null;
+
+    try {
+      data = JSON.parse(rawBody);
+    } catch (_e) {
+      data = null;
+    }
+
+    if (!data) {
+      res.status(hfRes.ok ? 502 : hfRes.status).json({
+        error: hfRes.ok
+          ? 'Hugging Face returned a non-JSON response.'
+          : 'Hugging Face API request failed with non-JSON response.',
+        details: {
+          contentType,
+          preview: rawBody.slice(0, 300)
+        }
+      });
+      return;
+    }
 
     if (!hfRes.ok) {
       res.status(hfRes.status).json({
@@ -176,8 +166,41 @@ export default async function handler(req, res) {
       return;
     }
 
-    const fullText = data?.[0]?.generated_text || '';
+    const fullText = data?.[0]?.generated_text || data?.generated_text || '';
     const text = fullText.replace(prompt, '').trim();
+
+    // Count usage only after successful text generation.
+    if (usageRows.length > 0) {
+      const nextCount = currentCount + 1;
+      const patchRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily?user_id=eq.${userId}&usage_date=eq.${today}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: supabaseServiceRoleKey,
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ count: nextCount })
+      });
+      if (!patchRes.ok) {
+        res.status(500).json({ error: 'Failed to update usage count after generation.' });
+        return;
+      }
+    } else {
+      const insertRes = await fetch(`${supabaseUrl}/rest/v1/usage_daily`, {
+        method: 'POST',
+        headers: {
+          apikey: supabaseServiceRoleKey,
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ user_id: userId, usage_date: today, count: 1 })
+      });
+      if (!insertRes.ok) {
+        res.status(500).json({ error: 'Failed to initialize usage count after generation.' });
+        return;
+      }
+    }
+
     const remaining = Math.max(0, limit - (currentCount + 1));
 
     res.status(200).json({ text: text || 'Something went wrong. Please try again.', remaining });
