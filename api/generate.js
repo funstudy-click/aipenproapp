@@ -116,10 +116,11 @@ export default async function handler(req, res) {
   }
 
   const model = 'mistralai/Mistral-7B-Instruct-v0.1';
+  const hfUrl = `https://router.huggingface.co/hf-inference/models/${model}`;
   const prompt = `${system}\n\n${user}`;
 
   try {
-    const hfRes = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
+    const hfRes = await fetch(hfUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -151,6 +152,7 @@ export default async function handler(req, res) {
           ? 'Hugging Face returned a non-JSON response.'
           : 'Hugging Face API request failed with non-JSON response.',
         details: {
+          endpoint: hfUrl,
           contentType,
           preview: rawBody.slice(0, 300)
         }
