@@ -115,10 +115,9 @@ export default async function handler(req, res) {
     return;
   }
 
-  // This provider currently rejects some legacy Mistral model IDs.
-  // Override with HUGGINGFACE_MODEL in Vercel env vars when needed.
-  const model = process.env.HUGGINGFACE_MODEL || 'gpt2';
-  const hfUrl = `https://router.huggingface.co/hf-inference/models/${model}`;
+  // Use direct Inference API endpoint to avoid provider routing incompatibilities.
+  const model = process.env.HUGGINGFACE_MODEL || 'google/flan-t5-base';
+  const hfUrl = `https://api-inference.huggingface.co/models/${model}`;
   const prompt = `${system}\n\n${user}`;
 
   try {
@@ -134,6 +133,9 @@ export default async function handler(req, res) {
           max_new_tokens: 500,
           temperature: 0.7,
           top_p: 0.9
+        },
+        options: {
+          wait_for_model: true
         }
       })
     });
