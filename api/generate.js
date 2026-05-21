@@ -122,21 +122,21 @@ export default async function handler(req, res) {
   const prompt = `${system}\n\n${user}`;
 
   try {
-    const preferredModel = process.env.HUGGINGFACE_MODEL || '';
-    const candidateModels = [
-      preferredModel,
-      'google/flan-t5-large',
-      'google/flan-t5-base',
-      'bigscience/bloom-560m',
-      'distilgpt2'
+    const chatPreferredModel = process.env.HUGGINGFACE_CHAT_MODEL || process.env.HUGGINGFACE_MODEL || '';
+    const chatModels = [
+      chatPreferredModel,
+      'Qwen/Qwen2.5-7B-Instruct',
+      'meta-llama/Llama-3.1-8B-Instruct',
+      'mistralai/Mistral-7B-Instruct-v0.3'
     ].filter(Boolean);
 
     let selectedModel = null;
-    let successData = null;
+    let selectedRoute = null;
+    let outputText = null;
     let lastFailure = null;
 
-    for (const model of candidateModels) {
-      const hfUrl = `https://router.huggingface.co/hf-inference/models/${model}`;
+    for (const model of chatModels) {
+      const hfUrl = 'https://router.huggingface.co/v1/chat/completions';
       const hfRes = await fetch(hfUrl, {
         method: 'POST',
         headers: {
@@ -144,12 +144,14 @@ export default async function handler(req, res) {
           Authorization: `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          inputs: prompt,
-          parameters: {
-            max_new_tokens: 500,
-            temperature: 0.7,
-            top_p: 0.9
-          }
+          model,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+          ],
+          max_tokens: 500,
+          temperature: 0.7,
+          top_p: 0.9
         })
       });
 
@@ -172,6 +174,7 @@ export default async function handler(req, res) {
           error: 'Hugging Face API request failed with non-JSON response.',
           details: {
             model,
+            route: 'chat-completions',
             endpoint: hfUrl,
             contentType,
             preview: rawBody.slice(0, 300)
@@ -188,7 +191,7 @@ export default async function handler(req, res) {
           lastFailure = {
             status: hfRes.status,
             error: errMsg,
-            details: { model, endpoint: hfUrl, response: data }
+            details: { model, route: 'chat-completions', endpoint: hfUrl, response: data }
           };
           continue;
         }
@@ -196,36 +199,143 @@ export default async function handler(req, res) {
         if (hfRes.status === 401) {
           res.status(401).json({
             error: 'Invalid Hugging Face token. Update HUGGINGFACE_API_TOKEN in Vercel project settings.',
-            details: { model, endpoint: hfUrl, response: data }
+            details: { model, route: 'chat-completions', endpoint: hfUrl, response: data }
           });
           return;
         }
 
-        res.status(hfRes.status).json({
+        lastFailure = {
+          status: hfRes.status,
           error: data?.error || 'Hugging Face API request failed.',
-          details: { model, endpoint: hfUrl, response: data }
-        });
-        return;
+          details: { model, route: 'chat-completions', endpoint: hfUrl, response: data }
+        };
+        continue;
+      }
+
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content || typeof content !== 'string') {
+        lastFailure = {
+          status: 502,
+          error: 'Hugging Face chat response did not contain text output.',
+          details: { model, route: 'chat-completions', endpoint: hfUrl, response: data }
+        };
+        continue;
       }
 
       selectedModel = model;
-      successData = data;
+      selectedRoute = 'chat-completions';
+      outputText = content.trim();
       break;
     }
 
-    if (!successData) {
+    if (!outputText) {
+      const legacyPreferredModel = process.env.HUGGINGFACE_LEGACY_MODEL || '';
+      const legacyModels = [
+        legacyPreferredModel,
+        'google/flan-t5-large',
+        'google/flan-t5-base',
+        'bigscience/bloom-560m',
+        'distilgpt2'
+      ].filter(Boolean);
+
+      for (const model of legacyModels) {
+        const hfUrl = `https://router.huggingface.co/hf-inference/models/${model}`;
+        const hfRes = await fetch(hfUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            inputs: prompt,
+            parameters: {
+              max_new_tokens: 500,
+              temperature: 0.7,
+              top_p: 0.9
+            }
+          })
+        });
+
+        const contentType = hfRes.headers.get('content-type') || '';
+        const rawBody = await hfRes.text();
+        let data = null;
+        try {
+          data = JSON.parse(rawBody);
+        } catch (e) {
+          data = null;
+          if (rawBody) {
+            console.error('Failed to parse Hugging Face JSON response:', String(e));
+          }
+        }
+
+        if (!data) {
+          lastFailure = {
+            status: hfRes.status,
+            error: 'Hugging Face API request failed with non-JSON response.',
+            details: {
+              model,
+              route: 'hf-inference',
+              endpoint: hfUrl,
+              contentType,
+              preview: rawBody.slice(0, 300)
+            }
+          };
+          break;
+        }
+
+        if (!hfRes.ok) {
+          const errMsg = String(data?.error || '');
+          if (errMsg.includes('Model not supported by provider')) {
+            lastFailure = {
+              status: hfRes.status,
+              error: errMsg,
+              details: { model, route: 'hf-inference', endpoint: hfUrl, response: data }
+            };
+            continue;
+          }
+
+          if (hfRes.status === 401) {
+            res.status(401).json({
+              error: 'Invalid Hugging Face token. Update HUGGINGFACE_API_TOKEN in Vercel project settings.',
+              details: { model, route: 'hf-inference', endpoint: hfUrl, response: data }
+            });
+            return;
+          }
+
+          lastFailure = {
+            status: hfRes.status,
+            error: data?.error || 'Hugging Face API request failed.',
+            details: { model, route: 'hf-inference', endpoint: hfUrl, response: data }
+          };
+          continue;
+        }
+
+        const fullText = data?.[0]?.generated_text || data?.generated_text || '';
+        const text = fullText.replace(prompt, '').trim();
+        selectedModel = model;
+        selectedRoute = 'hf-inference';
+        outputText = text;
+        break;
+      }
+    }
+
+    if (!outputText) {
       res.status(lastFailure?.status || 502).json({
         error: lastFailure?.error || 'No supported Hugging Face model succeeded.',
         details: {
-          attemptedModels: candidateModels,
+          attemptedChatModels: chatModels,
+          attemptedLegacyModels: [
+            process.env.HUGGINGFACE_LEGACY_MODEL || '',
+            'google/flan-t5-large',
+            'google/flan-t5-base',
+            'bigscience/bloom-560m',
+            'distilgpt2'
+          ].filter(Boolean),
           lastFailure: lastFailure?.details || null
         }
       });
       return;
     }
-
-    const fullText = successData?.[0]?.generated_text || successData?.generated_text || '';
-    const text = fullText.replace(prompt, '').trim();
 
     // Count usage only after successful text generation.
     if (usageRows.length > 0) {
@@ -261,7 +371,12 @@ export default async function handler(req, res) {
 
     const remaining = Math.max(0, limit - (currentCount + 1));
 
-    res.status(200).json({ text: text || 'Something went wrong. Please try again.', remaining, model: selectedModel });
+    res.status(200).json({
+      text: outputText || 'Something went wrong. Please try again.',
+      remaining,
+      model: selectedModel,
+      route: selectedRoute
+    });
   } catch (error) {
     res.status(500).json({
       error: 'Server error while calling Hugging Face.',
