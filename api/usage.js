@@ -50,6 +50,7 @@ export default async function handler(req, res) {
 
   // Get user plan
   let limit = 5;
+  let plan = 'free';
   try {
     const profileRes = await fetch(`${supabaseUrl}/rest/v1/user_profiles?user_id=eq.${userId}&select=plan`, {
       method: 'GET',
@@ -63,10 +64,12 @@ export default async function handler(req, res) {
       const profiles = await profileRes.json();
       if (profiles?.[0]?.plan === 'pro') {
         limit = 9999;
+        plan = 'pro';
       }
     }
-  } catch (_) {
+  } catch (err) {
     // Default to free
+    console.error('Profile lookup failed:', String(err));
   }
   const today = new Date().toISOString().split('T')[0];
 
@@ -83,7 +86,10 @@ export default async function handler(req, res) {
     try {
       usageErr = await usageRes.json();
     } catch (e) {
-      usageErr = { message: 'Non-JSON error response from Supabase REST API.' };
+      usageErr = {
+        message: 'Non-JSON error response from Supabase REST API.',
+        parseError: String(e)
+      };
     }
 
     const errCode = usageErr?.code || '';
@@ -105,5 +111,5 @@ export default async function handler(req, res) {
   const count = usageRows?.[0]?.count || 0;
   const remaining = Math.max(0, limit - count);
 
-  res.status(200).json({ count, remaining, limit });
+  res.status(200).json({ count, remaining, limit, plan });
 }

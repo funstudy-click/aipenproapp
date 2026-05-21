@@ -177,6 +177,9 @@
   .modal-plan-desc { font-size: 0.75rem; color: var(--ink-muted); margin-top: 0.2rem; }
   .modal-close { font-size: 0.8rem; color: var(--ink-muted); cursor: pointer; text-decoration: underline; background: none; border: none; font-family: var(--sans); }
   .modal-close:hover { color: var(--ink); }
+  .checkout-note { font-size: 0.78rem; color: var(--ink-muted); margin-bottom: 0.6rem; }
+  .checkout-message { font-size: 0.8rem; color: var(--ink-soft); min-height: 1.1rem; margin-bottom: 0.8rem; }
+  .paypal-buttons-wrap { min-height: 40px; }
   .modal-cta {
     display: block; width: 100%; padding: 0.875rem; font-size: 0.95rem; font-weight: 600;
     background: var(--ink); color: var(--gold-light); border: none; border-radius: 10px;
@@ -319,7 +322,10 @@
         <div class="modal-plan-desc">Unlimited / month</div>
       </div>
     </div>
-    <button class="modal-cta" onclick="goToPricing()">Upgrade to Pro — £9/mo →</button>
+    <p class="checkout-note">Pay securely by card or PayPal.</p>
+    <p class="checkout-message" id="checkoutMessage"></p>
+    <div id="paypalButtons" class="paypal-buttons-wrap"></div>
+    <button class="modal-cta" id="checkoutFallbackBtn" onclick="goToPricing()">See pricing details</button>
     <button class="modal-close" onclick="closeModal()">Maybe later</button>
   </div>
 </div>
@@ -366,8 +372,11 @@ let authMode = 'login';
 let supabaseClient = null;
 let currentSession = null;
 let remainingToday = null;
+let currentPlan = 'free';
 let lastLoginAttempt = 0;
 let loginThrottleCount = 0;
+let paypalSDKPromise = null;
+let paypalButtonsRendered = false;
 
 const typePrompts = {
   email: 'Write a professional email.',
@@ -395,6 +404,12 @@ function updateUsagePill() {
     return;
   }
 
+  if (currentPlan === 'pro') {
+    pill.textContent = 'Pro plan • Unlimited';
+    pill.className = 'usage-pill';
+    return;
+  }
+
   if (remainingToday === null) {
     pill.textContent = 'Checking daily limit...';
     pill.className = 'usage-pill';
@@ -411,6 +426,9 @@ function canGenerate() {
   if (!currentSession) {
     openAuthModal();
     return false;
+  }
+  if (currentPlan === 'pro') {
+    return true;
   }
   if (remainingToday === 0) {
     openModal();
@@ -587,6 +605,7 @@ function copyText() {
 // Modal
 function openModal() {
   document.getElementById('modal').classList.add('open');
+  initPayPalCheckout();
 }
 function closeModal() {
   document.getElementById('modal').classList.remove('open');
@@ -597,6 +616,125 @@ function closeModalOutside(e) {
 }
 function goToPricing() {
   globalThis.location.href = 'index.html#pricing';
+}
+
+function setCheckoutMessage(msg, isError = false) {
+  const el = document.getElementById('checkoutMessage');
+  el.textContent = msg;
+  el.style.color = isError ? 'var(--red)' : 'var(--ink-soft)';
+}
+
+async function getPayPalConfig() {
+  const res = await fetch('/api/paypal-config');
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data?.error || 'PayPal configuration is unavailable.');
+  }
+  return data;
+}
+
+async function loadPayPalSDK(clientId, currency) {
+  if (paypalSDKPromise) return paypalSDKPromise;
+  paypalSDKPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-paypal-sdk="true"]');
+    if (existing && globalThis.paypal) {
+      resolve(globalThis.paypal);
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${encodeURIComponent(currency || 'GBP')}&intent=capture`;
+    script.async = true;
+    script.dataset.paypalSdk = 'true';
+    script.onload = () => {
+      if (globalThis.paypal) resolve(globalThis.paypal);
+      else reject(new Error('PayPal SDK did not initialize.'));
+    };
+    script.onerror = () => reject(new Error('Failed to load PayPal SDK.'));
+    document.head.appendChild(script);
+  });
+  return paypalSDKPromise;
+}
+
+async function initPayPalCheckout() {
+  const buttonsContainer = document.getElementById('paypalButtons');
+  const fallbackBtn = document.getElementById('checkoutFallbackBtn');
+
+  if (paypalButtonsRendered) return;
+
+  if (!currentSession) {
+    fallbackBtn.style.display = 'block';
+    setCheckoutMessage('Please login first to start Pro checkout.', true);
+    return;
+  }
+
+  if (currentPlan === 'pro') {
+    fallbackBtn.style.display = 'none';
+    setCheckoutMessage('Your account is already on Pro.');
+    return;
+  }
+
+  try {
+    setCheckoutMessage('Loading secure checkout...');
+    const cfg = await getPayPalConfig();
+    const paypal = await loadPayPalSDK(cfg.clientId, cfg.currency);
+
+    await paypal.Buttons({
+      style: {
+        layout: 'vertical',
+        shape: 'pill',
+        label: 'pay'
+      },
+      createOrder: async () => {
+        const token = currentSession?.access_token;
+        const res = await fetch('/api/paypal-create-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          }
+        });
+        const data = await res.json();
+        if (!res.ok || !data?.orderID) {
+          throw new Error(data?.error || 'Could not create PayPal order.');
+        }
+        return data.orderID;
+      },
+      onApprove: async (data) => {
+        const token = currentSession?.access_token;
+        const res = await fetch('/api/paypal-capture-order', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ orderID: data.orderID })
+        });
+        const capture = await res.json();
+        if (!res.ok || !capture?.ok) {
+          throw new Error(capture?.error || 'Payment capture failed.');
+        }
+        currentPlan = 'pro';
+        remainingToday = 9999;
+        updateUsagePill();
+        setCheckoutMessage('Payment successful. Pro unlocked.');
+        closeModal();
+      },
+      onError: (err) => {
+        setCheckoutMessage(String(err?.message || err || 'PayPal checkout failed.'), true);
+      },
+      onCancel: () => {
+        setCheckoutMessage('Checkout canceled. No payment was taken.');
+      }
+    }).render('#paypalButtons');
+
+    paypalButtonsRendered = true;
+    buttonsContainer.style.display = 'block';
+    fallbackBtn.style.display = 'none';
+    setCheckoutMessage('');
+  } catch (err) {
+    fallbackBtn.style.display = 'block';
+    setCheckoutMessage(err.message || 'Unable to initialize PayPal checkout right now.', true);
+  }
 }
 
 function openAuthModal() {
@@ -805,15 +943,18 @@ async function fetchUsage() {
     if (!res.ok) {
       // Fall back to full free quota display to avoid an infinite "Checking..." UI state.
       remainingToday = FREE_LIMIT;
+      currentPlan = 'free';
       updateUsagePill();
       if (data?.error) setAuthMessage(data.error, true);
       return;
     }
     remainingToday = data.remaining;
+    currentPlan = data.plan || (data.limit > 1000 ? 'pro' : 'free');
     updateUsagePill();
   } catch {
     // Fall back to full free quota display if usage endpoint is temporarily unavailable.
     remainingToday = FREE_LIMIT;
+    currentPlan = 'free';
     updateUsagePill();
   }
 }
@@ -821,6 +962,7 @@ async function fetchUsage() {
 async function setSession(session) {
   currentSession = session;
   remainingToday = null;
+  currentPlan = 'free';
 
   const emailEl = document.getElementById('userEmail');
   const authBtn = document.getElementById('authBtn');
@@ -870,6 +1012,10 @@ async function initAuth() {
 }
 
 initAuth();
+
+if (new URLSearchParams(globalThis.location.search).get('plan') === 'pro') {
+  openModal();
+}
 </script>
 </body>
 </html>

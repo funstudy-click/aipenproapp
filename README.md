@@ -9,6 +9,9 @@ AI-powered writing assistant for professionals. Generate emails, proposals, repo
 - `api/generate.js` — Serverless API route that calls Hugging Face securely, enforces quotas
 - `api/usage.js` — Serverless API route to fetch per-user daily usage
 - `api/auth-throttle.js` — Rate-limiting for login attempts (5 per 15 min)
+- `api/paypal-config.js` — Exposes PayPal client config for checkout
+- `api/paypal-create-order.js` — Creates a PayPal order for Pro upgrade
+- `api/paypal-capture-order.js` — Captures PayPal order and upgrades user plan to Pro
 - `vercel.json` — Vercel deployment config
 
 ## Features
@@ -63,6 +66,10 @@ This app uses server-side API routes for all sensitive operations.
 | `HUGGINGFACE_API_TOKEN` | Your Hugging Face token from https://huggingface.co/settings/tokens |
 | `SUPABASE_URL` | Your Supabase URL (example: `https://xyzcompany.supabase.co`) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Your Supabase service role key (from Settings → API) |
+| `PAYPAL_CLIENT_ID` | PayPal REST app client ID (Sandbox or Live) |
+| `PAYPAL_CLIENT_SECRET` | PayPal REST app client secret (Sandbox or Live) |
+| `PAYPAL_ENV` | `sandbox` for testing, `live` for production |
+| `PAYPAL_PRO_PRICE_GBP` | Optional, defaults to `9.00` |
 
 4. **Redeploy** the project after adding variables
 
@@ -193,19 +200,23 @@ In Supabase, go to **Authentication → Email Templates**:
 2. Add your domain (e.g. `aipenproapp.com`)
 3. Update your DNS as instructed by Vercel
 
-## Adding Real Payments (Stripe)
+## Adding Real Payments (PayPal)
 
-To actually charge users for Pro:
+This project now supports PayPal checkout in the Upgrade modal:
 
-1. Create a Stripe account at https://stripe.com
-2. Create a product + price (e.g., £9/month)
-3. Use Stripe Checkout or Payment Links
-4. After payment, users should be upgraded to Pro in the `user_profiles` table manually or via webhook
-5. Backend checks `user_profiles.plan` to enforce unlimited quota
+1. Create a PayPal developer app at https://developer.paypal.com
+2. Copy Sandbox credentials for testing first
+3. Add `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, and `PAYPAL_ENV=sandbox` in Vercel
+4. Redeploy and test Pro checkout from `app.html`
+5. For production, switch to Live credentials and set `PAYPAL_ENV=live`
 
-For production, implement:
-- A `/api/upgrade.js` endpoint that creates a Stripe checkout session
-- A webhook handler for `payment_intent.succeeded` that updates `user_profiles.plan = 'pro'`
+Current behavior:
+- The app creates and captures a PayPal order server-side.
+- On successful capture, `user_profiles.plan` is upgraded to `pro`.
+
+Important for recurring billing:
+- The current flow captures one payment and upgrades the plan.
+- If you need strict monthly auto-renewal, move to PayPal Subscriptions and add webhook-based plan lifecycle handling.
 
 ## How It Works
 
