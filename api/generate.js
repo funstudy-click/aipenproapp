@@ -62,7 +62,7 @@ export default async function handler(req, res) {
       method: 'GET',
       headers: {
         apikey: supabaseServiceRoleKey,
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${supabaseServiceRoleKey}`
       }
     });
 
@@ -82,7 +82,7 @@ export default async function handler(req, res) {
     method: 'GET',
     headers: {
       apikey: supabaseServiceRoleKey,
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${supabaseServiceRoleKey}`
     }
   });
 
@@ -344,7 +344,7 @@ export default async function handler(req, res) {
         method: 'PATCH',
         headers: {
           apikey: supabaseServiceRoleKey,
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ count: nextCount })
@@ -358,7 +358,7 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: {
           apikey: supabaseServiceRoleKey,
-          Authorization: `Bearer ${token}`,
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({ user_id: userId, usage_date: today, count: 1 })

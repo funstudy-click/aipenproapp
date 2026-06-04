@@ -56,7 +56,7 @@ export default async function handler(req, res) {
       method: 'GET',
       headers: {
         apikey: supabaseServiceRoleKey,
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${supabaseServiceRoleKey}`
       }
     });
 
@@ -77,7 +77,7 @@ export default async function handler(req, res) {
     method: 'GET',
     headers: {
       apikey: supabaseServiceRoleKey,
-      Authorization: `Bearer ${token}`
+      Authorization: `Bearer ${supabaseServiceRoleKey}`
     }
   });
 
