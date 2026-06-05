@@ -14,6 +14,14 @@ export default async function handler(req, res) {
     return;
   }
 
+  // Guard against accidentally setting anon/publishable key in server env vars.
+  if (supabaseServiceRoleKey.startsWith('sb_publishable_')) {
+    res.status(500).json({
+      error: 'SUPABASE_SERVICE_ROLE_KEY is misconfigured (publishable key provided). Set the service_role key from Supabase Settings > API.'
+    });
+    return;
+  }
+
   const authHeader = req.headers.authorization || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   if (!token) {
@@ -101,6 +109,13 @@ export default async function handler(req, res) {
     if (errCode === '42P01' || errCode === 'PGRST205') {
       res.status(500).json({
         error: 'usage_daily table not found or not exposed in Data API. Run setup SQL and ensure table is in exposed schema.',
+        details: usageErr
+      });
+      return;
+    }
+    if (errCode === '42501') {
+      res.status(500).json({
+        error: 'Supabase permission denied while reading usage. Verify SUPABASE_SERVICE_ROLE_KEY is correct and table grants are present.',
         details: usageErr
       });
       return;
