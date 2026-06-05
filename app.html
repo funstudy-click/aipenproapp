@@ -473,6 +473,16 @@ function showError(text) {
   document.getElementById('genBtn').disabled = false;
 }
 
+function formatApiDetails(details) {
+  if (!details) return '';
+  try {
+    if (typeof details === 'string') return `\n\nDetails: ${details}`;
+    return `\n\nDetails: ${JSON.stringify(details, null, 2)}`;
+  } catch (_err) {
+    return '\n\nDetails: [unavailable]';
+  }
+}
+
 async function callAPI(system, user) {
   const token = currentSession?.access_token;
   if (!token) return { error: 'Please login first.', status: 401 };
@@ -490,13 +500,28 @@ async function callAPI(system, user) {
     })
   });
   
-  const data = await res.json();
-  if (!res.ok) {
-    console.error('API Error:', data);
-    return { error: data.error || 'API error. Check console for details.', status: res.status, remaining: data.remaining };
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (_err) {
+    data = null;
   }
 
-  return data;
+  if (!res.ok) {
+    console.error('API Error:', {
+      status: res.status,
+      statusText: res.statusText,
+      body: data
+    });
+    return {
+      error: data?.error || `API error (${res.status}).`,
+      details: data?.details || null,
+      status: res.status,
+      remaining: data?.remaining
+    };
+  }
+
+  return data || {};
 }
 
 async function generate() {
@@ -524,7 +549,7 @@ async function generate() {
       document.getElementById('emailVerifyBanner').classList.remove('hidden');
     }
     if (result.status === 429) openModal();
-    showError(result.error);
+    showError(result.error + formatApiDetails(result.details));
     return;
   }
 
@@ -553,7 +578,7 @@ async function makeItShorter() {
       document.getElementById('emailVerifyBanner').classList.remove('hidden');
     }
     if (result.status === 429) openModal();
-    showError(result.error);
+    showError(result.error + formatApiDetails(result.details));
     return;
   }
   if (typeof result.remaining === 'number') {
@@ -580,7 +605,7 @@ async function makeItLonger() {
       document.getElementById('emailVerifyBanner').classList.remove('hidden');
     }
     if (result.status === 429) openModal();
-    showError(result.error);
+    showError(result.error + formatApiDetails(result.details));
     return;
   }
   if (typeof result.remaining === 'number') {
