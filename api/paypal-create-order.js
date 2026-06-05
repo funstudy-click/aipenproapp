@@ -2,6 +2,14 @@ const PAYPAL_BASE_URL = process.env.PAYPAL_ENV === 'live'
   ? 'https://api-m.paypal.com'
   : 'https://api-m.sandbox.paypal.com';
 
+function normalizeGbpAmount(raw) {
+  const source = String(raw || '9.00').trim();
+  const cleaned = source.replace(/[^0-9.,-]/g, '').replace(',', '.');
+  const parsed = Number(cleaned);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed.toFixed(2);
+}
+
 async function getPayPalAccessToken() {
   const clientId = process.env.PAYPAL_CLIENT_ID;
   const clientSecret = process.env.PAYPAL_CLIENT_SECRET;
@@ -83,7 +91,15 @@ export default async function handler(req, res) {
 
   try {
     const paypalToken = await getPayPalAccessToken();
-    const amount = process.env.PAYPAL_PRO_PRICE_GBP || '9.00';
+    const rawAmount = process.env.PAYPAL_PRO_PRICE_GBP || '9.00';
+    const amount = normalizeGbpAmount(rawAmount);
+    if (!amount) {
+      res.status(500).json({
+        error: 'Invalid PAYPAL_PRO_PRICE_GBP value. Use numeric format such as 9 or 9.00.',
+        details: { configuredValue: String(rawAmount) }
+      });
+      return;
+    }
 
     const orderRes = await fetch(`${PAYPAL_BASE_URL}/v2/checkout/orders`, {
       method: 'POST',
